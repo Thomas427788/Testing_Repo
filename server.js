@@ -11,7 +11,7 @@ const server = http.createServer(app);
 const io = new Server(server);
 
 const PORT = 3000;
-const SERIAL_PATH = '/dev/ttyS0'; // Default UART on Raspberry Pi — change if needed (e.g. /dev/ttyUSB0)
+const SERIAL_PATH = '/dev/ttyACM0';  // STM32 USB CDC Virtual COM Port
 const BAUD_RATE = 115200;
 const LOG_FILE = path.join(__dirname, 'session_log.csv');
 
