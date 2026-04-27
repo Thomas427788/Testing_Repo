@@ -19,6 +19,10 @@
 /* Includes ------------------------------------------------------------------*/
 #include "main.h"
 #include "usb_device.h"
+#include <stdio.h>
+#include <string.h>
+#include <stdlib.h>
+#include "usbd_cdc_if.h"
 
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
@@ -48,6 +52,11 @@ I2S_HandleTypeDef hi2s3;
 SPI_HandleTypeDef hspi1;
 
 /* USER CODE BEGIN PV */
+#define RX_BUF_SIZE 128
+uint8_t rx_buf[RX_BUF_SIZE];
+uint8_t rx_index = 0;
+volatile uint8_t line_ready = 0;
+char line_buf[RX_BUF_SIZE];
 
 /* USER CODE END PV */
 
@@ -63,15 +72,67 @@ static void MX_SPI1_Init(void);
 
 /* Private user code ---------------------------------------------------------*/
 /* USER CODE BEGIN 0 */
-#include <stdio.h>
-#include "usbd_cdc_if.h"
-
+// Redirect printf to USB CDC
 int __io_putchar(int ch) {
     uint8_t c = (uint8_t)ch;
-    // Retry until the USB TX buffer is free
     while (CDC_Transmit_FS(&c, 1) == USBD_BUSY);
     return ch;
 }
+
+// Called by usbd_cdc_if.c when data arrives from the Pi
+void CDC_ReceiveCallback(uint8_t *buf, uint32_t len) {
+    for (uint32_t i = 0; i < len; i++) {
+        char c = (char)buf[i];
+        if (c == '\n' || c == '\r') {
+            if (rx_index > 0) {
+                line_buf[rx_index] = '\0';
+                line_ready = 1;
+                rx_index = 0;
+            }
+        } else if (rx_index < RX_BUF_SIZE - 1) {
+            rx_buf[rx_index++] = (uint8_t)c;
+        }
+    }
+}
+
+// Parse "NAME:John;PRESSURE:45.50" and act on it
+void process_command(char *cmd) {
+    char name[64] = {0};
+    float pressure = -1.0f;
+
+    char *name_ptr = strstr(cmd, "NAME:");
+    char *pres_ptr = strstr(cmd, "PRESSURE:");
+
+    if (name_ptr) {
+        name_ptr += 5; // skip "NAME:"
+        char *end = strchr(name_ptr, ';');
+        size_t len = end ? (size_t)(end - name_ptr) : strlen(name_ptr);
+        strncpy(name, name_ptr, len);
+    }
+
+    if (pres_ptr) {
+        pres_ptr += 9; // skip "PRESSURE:"
+        pressure = strtof(pres_ptr, NULL);
+    }
+
+    if (strlen(name) > 0 && pressure >= 0) {
+        printf("ACK:NAME:%s;PRESSURE:%.2f;STATUS:OK\r\n", name, pressure);
+
+        // TODO: Add your actual hardware logic here
+        // e.g. control a valve, trigger a pump, etc.
+        // Example: light an LED based on pressure
+        if (pressure > 50.0f) {
+            HAL_GPIO_WritePin(GPIOD, LD5_Pin, GPIO_PIN_SET);   // Red LED on
+            HAL_GPIO_WritePin(GPIOD, LD4_Pin, GPIO_PIN_RESET);
+        } else {
+            HAL_GPIO_WritePin(GPIOD, LD4_Pin, GPIO_PIN_SET);   // Green LED on
+            HAL_GPIO_WritePin(GPIOD, LD5_Pin, GPIO_PIN_RESET);
+        }
+    } else {
+        printf("ERR:BAD_COMMAND\r\n");
+    }
+}
+
 /* USER CODE END 0 */
 
 /**
@@ -114,17 +175,20 @@ int main(void)
 
   /* Infinite loop */
   /* USER CODE BEGIN WHILE */
-  while (1)
-  {
-    /* USER CODE END WHILE */
-	printf("Hello from STM32F407! Tick: %lu\r\n", HAL_GetTick());
-	HAL_Delay(1000);
-    /* USER CODE BEGIN 3 */
+  while (1) {
+    if (line_ready) {
+        line_ready = 0;
+        process_command(line_buf);
+    }
+    HAL_Delay(10);  // Small yield — don't block with 1000ms anymore
   }
-  /* USER CODE END 3 */
-}
+  /* USER CODE END WHILE */
 
-/**
+  /* USER CODE BEGIN 3 */
+
+  /* USER CODE END 3 */
+
+  /**
   * @brief System Clock Configuration
   * @retval None
   */
