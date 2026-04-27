@@ -1,0 +1,19 @@
+{
+  "name": "stm32-pressure-controller",
+  "version": "1.0.0",
+  "description": "Raspberry Pi GUI to control STM32 pressure via UART",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "nodemon server.js"
+  },
+  "dependencies": {
+    "express": "^4.18.2",
+    "serialport": "^12.0.0",
+    "@serialport/parser-readline": "^12.0.0",
+    "socket.io": "^4.7.2"
+  },
+  "devDependencies": {
+    "nodemon": "^3.0.1"
+  }
+}

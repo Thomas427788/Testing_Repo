@@ -1,0 +1,721 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>STM32 Pressure Controller</title>
+  <link href="https://fonts.googleapis.com/css2?family=Share+Tech+Mono&family=Barlow:wght@300;400;600;700&display=swap" rel="stylesheet" />
+  <script src="/socket.io/socket.io.js"></script>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --bg:        #0b0e13;
+      --surface:   #111620;
+      --border:    #1e2a3a;
+      --accent:    #00d4ff;
+      --accent2:   #ff6b35;
+      --green:     #39ff14;
+      --red:       #ff3c3c;
+      --text:      #c8daea;
+      --muted:     #4a6175;
+      --mono:      'Share Tech Mono', monospace;
+      --sans:      'Barlow', sans-serif;
+    }
+
+    body {
+      background: var(--bg);
+      color: var(--text);
+      font-family: var(--sans);
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      padding: 2rem 1rem 4rem;
+      background-image:
+        radial-gradient(ellipse 60% 40% at 50% 0%, rgba(0,212,255,0.07) 0%, transparent 70%),
+        repeating-linear-gradient(0deg, transparent, transparent 39px, rgba(30,42,58,0.4) 40px),
+        repeating-linear-gradient(90deg, transparent, transparent 39px, rgba(30,42,58,0.4) 40px);
+    }
+
+    /* ── Header ── */
+    header {
+      width: 100%;
+      max-width: 780px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 2.5rem;
+      padding-bottom: 1rem;
+      border-bottom: 1px solid var(--border);
+    }
+    .logo {
+      display: flex;
+      flex-direction: column;
+      gap: 2px;
+    }
+    .logo-sup {
+      font-family: var(--mono);
+      font-size: 0.65rem;
+      letter-spacing: 0.25em;
+      color: var(--accent);
+      text-transform: uppercase;
+    }
+    .logo-title {
+      font-size: 1.3rem;
+      font-weight: 700;
+      letter-spacing: 0.04em;
+      color: #fff;
+    }
+    .status-pill {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-family: var(--mono);
+      font-size: 0.72rem;
+      letter-spacing: 0.1em;
+      padding: 6px 14px;
+      border-radius: 100px;
+      border: 1px solid var(--border);
+      background: rgba(255,255,255,0.03);
+      transition: border-color 0.3s, color 0.3s;
+    }
+    .status-dot {
+      width: 8px; height: 8px;
+      border-radius: 50%;
+      background: var(--muted);
+      transition: background 0.3s;
+      box-shadow: 0 0 0 0 transparent;
+    }
+    .status-pill.online .status-dot  { background: var(--green); box-shadow: 0 0 6px var(--green); }
+    .status-pill.online              { border-color: rgba(57,255,20,0.3); color: var(--green); }
+    .status-pill.offline .status-dot { background: var(--red); }
+    .status-pill.offline             { border-color: rgba(255,60,60,0.3); color: var(--red); }
+
+    /* ── Main grid ── */
+    main {
+      width: 100%;
+      max-width: 780px;
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 1.25rem;
+    }
+
+    .card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 1.6rem;
+      position: relative;
+      overflow: hidden;
+    }
+    .card::before {
+      content: '';
+      position: absolute;
+      top: 0; left: 0; right: 0;
+      height: 2px;
+      background: linear-gradient(90deg, transparent, var(--accent), transparent);
+      opacity: 0.4;
+    }
+    .card.full { grid-column: 1 / -1; }
+
+    .card-label {
+      font-family: var(--mono);
+      font-size: 0.62rem;
+      letter-spacing: 0.25em;
+      color: var(--accent);
+      text-transform: uppercase;
+      margin-bottom: 1.2rem;
+    }
+
+    /* ── Form ── */
+    .field { margin-bottom: 1.2rem; }
+    label {
+      display: block;
+      font-size: 0.72rem;
+      font-weight: 600;
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+      color: var(--muted);
+      margin-bottom: 6px;
+    }
+    input[type="text"],
+    input[type="number"] {
+      width: 100%;
+      background: rgba(0,0,0,0.35);
+      border: 1px solid var(--border);
+      border-radius: 7px;
+      color: #fff;
+      font-family: var(--mono);
+      font-size: 1rem;
+      padding: 10px 14px;
+      outline: none;
+      transition: border-color 0.2s, box-shadow 0.2s;
+    }
+    input:focus {
+      border-color: var(--accent);
+      box-shadow: 0 0 0 3px rgba(0,212,255,0.12);
+    }
+    input::placeholder { color: var(--muted); }
+
+    /* Pressure slider */
+    .pressure-wrap {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      margin-top: 10px;
+    }
+    input[type="range"] {
+      flex: 1;
+      -webkit-appearance: none;
+      height: 4px;
+      border-radius: 2px;
+      background: var(--border);
+      outline: none;
+    }
+    input[type="range"]::-webkit-slider-thumb {
+      -webkit-appearance: none;
+      width: 18px; height: 18px;
+      border-radius: 50%;
+      background: var(--accent);
+      cursor: pointer;
+      box-shadow: 0 0 8px var(--accent);
+      transition: transform 0.15s;
+    }
+    input[type="range"]::-webkit-slider-thumb:hover { transform: scale(1.25); }
+    .pressure-display {
+      font-family: var(--mono);
+      font-size: 1.35rem;
+      color: var(--accent);
+      min-width: 70px;
+      text-align: right;
+    }
+    .pressure-unit {
+      font-family: var(--mono);
+      font-size: 0.7rem;
+      color: var(--muted);
+      margin-top: 4px;
+      text-align: right;
+    }
+
+    /* Application time slider */
+    .applicationTime-wrap {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      margin-top: 10px;
+    }
+    input[type="range"] {
+      flex: 1;
+      -webkit-appearance: none;
+      height: 4px;
+      border-radius: 2px;
+      background: var(--border);
+      outline: none;
+    }
+    input[type="range"]::-webkit-slider-thumb {
+      -webkit-appearance: none;
+      width: 18px; height: 18px;
+      border-radius: 50%;
+      background: var(--accent);
+      cursor: pointer;
+      box-shadow: 0 0 8px var(--accent);
+      transition: transform 0.15s;
+    }
+    input[type="range"]::-webkit-slider-thumb:hover { transform: scale(1.25); }
+    .applicationTime-display {
+      font-family: var(--mono);
+      font-size: 1.35rem;
+      color: var(--accent);
+      min-width: 70px;
+      text-align: right;
+    }
+    .applicationTime-unit {
+      font-family: var(--mono);
+      font-size: 0.7rem;
+      color: var(--muted);
+      margin-top: 4px;
+      text-align: right;
+    }
+
+    /* Run button */
+    /* Why is this runBtn have a # before it? while the slider
+     entry above has a .? */ 
+    #runBtn {
+      width: 100%;
+      padding: 14px;
+      margin-top: 0.5rem;
+      border: none;
+      border-radius: 8px;
+      background: var(--accent);
+      color: #000;
+      font-family: var(--sans);
+      font-size: 0.95rem;
+      font-weight: 700;
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+      cursor: pointer;
+      position: relative;
+      overflow: hidden;
+      transition: transform 0.15s, box-shadow 0.2s, background 0.2s;
+    }
+    #runBtn:hover:not(:disabled) {
+      transform: translateY(-1px);
+      box-shadow: 0 6px 24px rgba(0,212,255,0.35);
+    }
+    #runBtn:active:not(:disabled) { transform: translateY(1px); }
+    #runBtn:disabled {
+      background: var(--muted);
+      cursor: not-allowed;
+      opacity: 0.6;
+    }
+    #runBtn.waiting {
+      background: var(--accent2);
+      animation: pulse-btn 1.2s ease-in-out infinite;
+    }
+    @keyframes pulse-btn {
+      0%, 100% { box-shadow: 0 0 0 0 rgba(255,107,53,0.5); }
+      50%       { box-shadow: 0 0 0 10px rgba(255,107,53,0); }
+    }
+
+    /* ── Pressure Gauge ── */
+    .gauge-wrap {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      height: 100%;
+      gap: 8px;
+    }
+    .gauge-svg { width: 160px; height: 90px; overflow: visible; }
+    #gaugeArc {
+      transition: stroke-dashoffset 0.5s cubic-bezier(.4,0,.2,1),
+                  stroke 0.5s;
+    }
+    #timeGaugeArc {
+      transition: stroke-dashoffset 0.5s cubic-bezier(.4,0,.2,1),
+                  stroke 0.5s;
+    }
+    .gauge-value {
+      font-family: var(--mono);
+      font-size: 2rem;
+      color: #fff;
+      line-height: 1;
+    }
+    .gauge-label {
+      font-family: var(--mono);
+      font-size: 0.65rem;
+      letter-spacing: 0.2em;
+      color: var(--muted);
+      text-transform: uppercase;
+    }
+
+    /* ── Response terminal ── */
+    #terminal {
+      background: #070a0e;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      height: 180px;
+      overflow-y: auto;
+      padding: 12px 14px;
+      font-family: var(--mono);
+      font-size: 0.8rem;
+      line-height: 1.7;
+      scroll-behavior: smooth;
+    }
+    .t-line { display: flex; gap: 10px; }
+    .t-ts   { color: var(--muted); white-space: nowrap; flex-shrink: 0; }
+    .t-msg.send { color: var(--accent); }
+    .t-msg.recv { color: var(--green); }
+    .t-msg.info { color: var(--muted); }
+    .t-msg.err  { color: var(--red); }
+    .t-msg.wait { color: var(--accent2); }
+
+    /* waiting indicator */
+    #waitingBar {
+      display: none;
+      align-items: center;
+      gap: 10px;
+      margin-top: 0.8rem;
+      font-family: var(--mono);
+      font-size: 0.75rem;
+      color: var(--accent2);
+    }
+    #waitingBar.active { display: flex; }
+    .spinner {
+      width: 14px; height: 14px;
+      border: 2px solid rgba(255,107,53,0.2);
+      border-top-color: var(--accent2);
+      border-radius: 50%;
+      animation: spin 0.8s linear infinite;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    /* ── Log table ── */
+    .log-wrap {
+      max-height: 200px;
+      overflow-y: auto;
+      border-radius: 8px;
+      border: 1px solid var(--border);
+    }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      font-family: var(--mono);
+      font-size: 0.75rem;
+    }
+    thead th {
+      background: rgba(0,212,255,0.07);
+      color: var(--accent);
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+      padding: 8px 12px;
+      text-align: left;
+      position: sticky;
+      top: 0;
+    }
+    tbody tr { border-top: 1px solid var(--border); }
+    tbody tr:hover { background: rgba(255,255,255,0.02); }
+    tbody td {
+      padding: 7px 12px;
+      color: var(--text);
+    }
+    .empty-log {
+      padding: 20px;
+      text-align: center;
+      font-family: var(--mono);
+      font-size: 0.75rem;
+      color: var(--muted);
+    }
+
+    /* scrollbars */
+    ::-webkit-scrollbar { width: 5px; }
+    ::-webkit-scrollbar-track { background: transparent; }
+    ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+
+    @media (max-width: 580px) {
+      main { grid-template-columns: 1fr; }
+      .card.full { grid-column: 1; }
+    }
+  </style>
+</head>
+<body>
+
+<header>
+  <div class="logo">
+    <span class="logo-sup">Raspberry Pi · UART</span>
+    <span class="logo-title">Pressure Controller</span>
+  </div>
+  <div class="status-pill" id="statusPill">
+    <div class="status-dot"></div>
+    <span id="statusText">Connecting…</span>
+  </div>
+</header>
+
+<main>
+
+  <!-- ── Input form ── -->
+  <div class="card">
+    <div class="card-label">// Session Config</div>
+
+    <div class="field">
+      <label for="nameInput">Operator Name</label>
+      <input type="text" id="nameInput" placeholder="e.g. Jane Smith" autocomplete="off" />
+    </div>
+
+    <div class="field">
+      <label for="pressureInput">Target Pressure</label>
+      <input type="number" id="pressureInput" placeholder="0" min="0" max="500" step="0.5" />
+      <div class="pressure-wrap">
+        <input type="range" id="pressureSlider" min="0" max="500" step="0.5" value="0" />
+        <div>
+          <div class="pressure-display" id="pressureDisplay">0.0</div>
+          <div class="pressure-unit">PSI</div>
+        </div>
+      </div>
+
+	<label for="applicationTimeInput">Application Time</label>
+	<input type="number" id="applicationTimeInput" placeholder="0" min="0" max="500" step="0.5" />
+	<div class="applicationTime-wrap">
+	  <input type="range" id="applicationTimeSlider" min="0" max="500" step="0.5" value="0"/>
+	  <div>
+	    <div class="applicationTime-display" id="applicationTimeDisplay">0.0</div>
+	    <div class="applicationTime-unit">seconds</div>
+	  </div>
+	</div>  
+    </div>
+
+    <button id="runBtn">▶ Run</button>
+
+    <div id="waitingBar">
+      <div class="spinner"></div>
+      <span>Waiting for STM32 response…</span>
+    </div>
+  </div>
+
+  <!-- ── Gauges (stacked right column) ── -->
+ <div style="display:flex; flex-direction:column; gap:1.25rem;">
+ 
+  <!-- ──Pressure Gauge ── -->
+  <div class="card" style="display:flex;flex-direction:column;align-items:center;justify-content:center;">
+    <div class="card-label" style="align-self:flex-start;">// Pressure Gauge</div>
+    <div class="gauge-wrap">
+      <svg class="gauge-svg" viewBox="-10 -10 180 100">
+        <!-- track -->
+        <path d="M 10 80 A 70 70 0 0 1 150 80"
+              fill="none" stroke="#1e2a3a" stroke-width="10" stroke-linecap="round"/>
+        <!-- fill -->
+        <path id="gaugeArc"
+              d="M 10 80 A 70 70 0 0 1 150 80"
+              fill="none" stroke="#00d4ff" stroke-width="10" stroke-linecap="round"
+              stroke-dasharray="220" stroke-dashoffset="220"/>
+      </svg>
+      <div class="gauge-value" id="gaugeVal">0.0</div>
+      <div class="gauge-label">PSI</div>
+    </div>
+  </div>
+
+  <!-- ──Application Time Gauge ── -->
+  <div class="card" style="display:flex;flex-direction:column;align-items:center;justify-content:center;">
+    <div class="card-label" style="align-self:flex-start;">// Application Gauge</div>
+    <div class="gauge-wrap">
+      <svg class="gauge-svg" viewBox="-10 -10 180 100">
+        <!-- track -->
+        <path d="M 10 80 A 70 70 0 0 1 150 80"
+              fill="none" stroke="#1e2a3a" stroke-width="10" stroke-linecap="round"/>
+        <!-- fill -->
+        <path id="timeGaugeArc"
+              d="M 10 80 A 70 70 0 0 1 150 80"
+              fill="none" stroke="#ff6b35" stroke-width="10" stroke-linecap="round"
+              stroke-dasharray="220" stroke-dashoffset="220"/>
+      </svg>
+      <div class="gauge-value" id="timeGaugeVal">0.0</div>
+      <div class="gauge-label">Seconds</div>
+    </div>
+  </div>
+
+ </div>
+  <!-- ── Terminal ── -->
+  <div class="card full">
+    <div class="card-label">// Serial Monitor</div>
+    <div id="terminal"></div>
+  </div>
+
+  <!-- ── Log ── -->
+  <div class="card full">
+    <div class="card-label" style="display:flex;justify-content:space-between;">
+      <span>// Session Log</span>
+      <a id="downloadLog" href="/api/log" download="session_log.csv"
+         style="color:var(--accent);font-size:0.65rem;letter-spacing:0.15em;text-decoration:none;">
+
+        ↓ EXPORT CSV
+      </a>
+    </div>
+    <div class="log-wrap">
+      <div class="empty-log" id="emptyLog">No entries yet.</div>
+      <table id="logTable" style="display:none;">
+        <thead>
+          <tr>
+            <th>Time</th>
+            <th>Operator</th>
+            <th>Pressure (PSI)</th>
+            <th>Run Duration (sec)</th>
+            <th>STM32 Response</th>
+          </tr>
+        </thead>
+        <tbody id="logBody"></tbody>
+      </table>
+    </div>
+  </div>
+
+</main>
+
+<script>
+  const socket = io();
+
+  // ── State ──
+  let isWaiting = false;
+
+  // ── Elements ──
+  const nameInput      = document.getElementById('nameInput');
+  const pressureInput  = document.getElementById('pressureInput');
+  const pressureSlider = document.getElementById('pressureSlider');
+  const pressureDisplay= document.getElementById('pressureDisplay');
+  const applicationTimeInput= document.getElementById('applicationTimeInput');
+  const applicationTimeSlider= document.getElementById('applicationTimeSlider');
+  const applicationTimeDisplay= document.getElementById('applicationTimeDisplay');
+  const runBtn         = document.getElementById('runBtn');
+  const waitingBar     = document.getElementById('waitingBar');
+  const terminal       = document.getElementById('terminal');
+  const statusPill     = document.getElementById('statusPill');
+  const statusText     = document.getElementById('statusText');
+  const timeGaugeArc       = document.getElementById('timeGaugeArc');
+  const timeGaugeVal       = document.getElementById('timeGaugeVal');
+  const logBody        = document.getElementById('logBody');
+  const logTable       = document.getElementById('logTable');
+  const emptyLog       = document.getElementById('emptyLog');
+
+  // Gauge constants (arc length ~220 for the semicircle path above), MAX_PSI, MAX_APPLICATIONTIME 
+  const ARC_LEN = 220;
+  const MAX_PSI = 500;
+  const MAX_APPLICATIONTIME = 500
+
+  // ── Sync slider ↔ number input ──
+  function setPressure(val) {
+    const v = Math.max(0, Math.min(MAX_PSI, parseFloat(val) || 0));
+    pressureInput.value  = v;
+    pressureSlider.value = v;
+    pressureDisplay.textContent = v.toFixed(1);
+    updatePressureGauge(v);
+  }
+
+  function setApplicationTime(val) {
+    const w = Math.max(0, Math.min(MAX_APPLICATIONTIME, parseFloat(val) || 0));
+    applicationTimeInput.value  = w;
+    applicationTimeSlider.value = w;
+    applicationTimeDisplay.textContent = w.toFixed(1);
+    updateApplicationTimeGauge(w);
+  }
+
+  pressureSlider.addEventListener('input', () => setPressure(pressureSlider.value));
+  pressureInput.addEventListener('input',  () => setPressure(pressureInput.value));
+
+  applicationTimeSlider.addEventListener('input', () => setApplicationTime(applicationTimeSlider.value));
+  applicationTimeInput.addEventListener('input',  () => setApplicationTime(applicationTimeInput.value));
+
+  // ── Gauge update ──
+  function updatePressureGauge(psi) {
+    const pressureratio  = Math.min(psi / MAX_PSI, 1);
+    const offset = ARC_LEN - pressureratio * ARC_LEN;
+    gaugeArc.style.strokeDashoffset = offset;
+    gaugeVal.textContent = psi.toFixed(1);
+
+    // colour shift: cyan → orange → red
+    if (pressureratio < 0.5)      gaugeArc.style.stroke = '#00d4ff';
+    else if (pressureratio < 0.8) gaugeArc.style.stroke = '#ff9d00';
+    else                  gaugeArc.style.stroke = '#ff3c3c';
+  }
+
+  function updateApplicationTimeGauge(sec) {
+    const applicationtimeratio  = Math.min(sec / MAX_APPLICATIONTIME, 1);
+    const offset = ARC_LEN - applicationtimeratio * ARC_LEN;
+    timeGaugeArc.style.strokeDashoffset = offset;
+    timeGaugeVal.textContent = sec.toFixed(1);
+
+    // colour shift: cyan → orange → red
+    if (applicationtimeratio < 0.5)      gaugeArc.style.stroke = '#ffb35';
+    else if (applicationtimeratio < 0.8) gaugeArc.style.stroke = '#ffcc00';
+    else                  gaugeArc.style.stroke = '#ff3c3c';
+  }
+
+  // ── Terminal log ──
+  function termLog(msg, cls = 'info') {
+    const ts = new Date().toLocaleTimeString('en-US', { hour12: false });
+    const line = document.createElement('div');
+    line.className = 't-line';
+    line.innerHTML = `<span class="t-ts">[${ts}]</span><span class="t-msg ${cls}">${escHtml(msg)}</span>`;
+    terminal.appendChild(line);
+    terminal.scrollTop = terminal.scrollHeight;
+  }
+
+  function escHtml(s) {
+    return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+  }
+
+  // ── Session log table ──
+  function addLogRow(time, name, pressure, response) {
+    emptyLog.style.display = 'none';
+    logTable.style.display = 'table';
+    const tr = document.createElement('tr');
+    tr.innerHTML = `
+      <td>${escHtml(time)}</td>
+      <td>${escHtml(name)}</td>
+      <td>${escHtml(pressure)}</td>
+      <td>${escHtml(response)}</td>`;
+    logBody.prepend(tr); // newest first
+  }
+
+  // ── Serial status ──
+  socket.on('serial_status', ({ connected, message }) => {
+    statusPill.className = 'status-pill ' + (connected ? 'online' : 'offline');
+    statusText.textContent = connected ? 'UART Online' : 'UART Offline';
+    termLog(message, connected ? 'info' : 'err');
+    runBtn.disabled = !connected;
+  });
+
+  // ── STM32 response ──
+  socket.on('stm32_response', ({ timestamp, data }) => {
+    termLog(`← STM32: ${data}`, 'recv');
+    setWaiting(false);
+
+    // Grab last sent info from local state
+    const ts = new Date(timestamp).toLocaleTimeString('en-US', { hour12: false });
+    addLogRow(ts, lastSent.name, lastSent.pressure, data);
+  });
+
+  // ── Waiting state ──
+  let lastSent = { name: '', pressure: '' };
+
+  function setWaiting(active) {
+    isWaiting = active;
+    runBtn.disabled = active;
+    runBtn.textContent = active ? '⏳ Waiting…' : '▶ Run';
+    runBtn.className = active ? 'waiting' : '';
+    waitingBar.className = active ? 'active' : '';
+  }
+
+  // ── Run button ──
+  runBtn.addEventListener('click', async () => {
+    const name     = nameInput.value.trim();
+    const pressure = parseFloat(pressureInput.value);
+    const applicationTime = parseFloat(applicationTimeInput.value);
+
+    if (!name) {
+      nameInput.focus();
+      termLog('Enter an operator name before running.', 'err');
+      return;
+    }
+
+    if (isNaN(pressure) || pressure < 0) {
+      pressureInput.focus();
+      termLog('Enter a valid pressure value.', 'err');
+      return;
+    }
+
+    if (isNaN(applicationTime) || applicationTime < 0) {
+      applicationTimeInput.focus();
+      termLog('Enter a valid application time value.', 'err');
+      return;
+    }
+
+    lastSent = { name, pressure: pressure.toFixed(2), applicationTime: applicationTime.toFixed(2) };
+	  termLog(`→ Sending: NAME:${name} | PRESSURE:${pressure.toFixed(2)} PSI | APPLICATIONTIME:${applicationTime.toFixed(2)} seconds`, 'send');
+    setWaiting(true);
+
+    try {
+      const res  = await fetch('/api/run', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name, pressure }),
+      });
+      const json = await res.json();
+      if (!res.ok) {
+        termLog(`Error: ${json.error}`, 'err');
+        setWaiting(false);
+      } else {
+        termLog(`Sent at ${new Date(json.timestamp).toLocaleTimeString()}`, 'info');
+        addLogRow(new Date(json.timestamp).toLocaleTimeString(), name, pressure.toFixed(2), '…waiting');
+      }
+    } catch (err) {
+      termLog(`Request failed: ${err.message}`, 'err');
+      setWaiting(false);
+    }
+  });
+
+  // ── Init ──
+  setPressure(0);
+  setApplicationTime(0)
+  termLog('Interface ready. Awaiting UART connection…', 'info');
+</script>
+</body>
+</html>
