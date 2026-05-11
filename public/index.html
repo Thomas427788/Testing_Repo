@@ -239,8 +239,6 @@
     }
 
     /* Run button */
-    /* Why is this runBtn have a # before it? while the slider
-     entry above has a .? */ 
     #runBtn {
       width: 100%;
       padding: 14px;
@@ -276,6 +274,41 @@
     @keyframes pulse-btn {
       0%, 100% { box-shadow: 0 0 0 0 rgba(255,107,53,0.5); }
       50%       { box-shadow: 0 0 0 10px rgba(255,107,53,0); }
+    }
+
+
+    /* Calibrate button */
+    #calibrateBtn {
+      width: 100%;
+      padding: 14px;
+      margin-top: 0.6rem;a
+      border: 1px solid var(--muted);
+      border-radius: 8px;
+      background: transparent;
+      color: var(--muted);
+      font-family: var(--sans);
+      font-size: 0.95rem;
+      font-weight: 700;
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+      cursor: not-allowed;
+      transition: transform 0.15s, box-shadow 0.2s, background 0.2s, color 0.2s;
+    }
+    #calibrateBtn:ready {
+      border-color: var(--green);
+      color: var(--green);
+      cursor: pointer;
+      animation: pulse_calibrate 1.8s ease-in-out infinite;
+    }
+    #calibrateBtn:ready:hover {
+      background: rgba(57,255,20,0.08);
+      box-shadow: 0 0 18px rgba(57, 255, 20, 0.25);
+      transform: translateY(-1px);
+    }
+    #calibrateBtn.ready:active { transform: translate(1px);}
+    @keyframes pulse-calibrate {
+      0%, 100% { box-shadow: 0 0 0 0 rgba(57,255,20,0.4); }
+      50%       { box-shadow: 0 0 0 8px rgba(57,255,20,0); }
     }
 
     /* ── Pressure Gauge ── */
@@ -396,7 +429,54 @@
     @media (max-width: 580px) {
       main { grid-template-columns: 1fr; }
       .card.full { grid-column: 1; }
+    } /* ── Live Pressure Graph ── */
+    .graph-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 1rem;
     }
+    .graph-controls {
+      display: flex;
+      gap: 8px;
+      align-items: center;
+    }
+    .graph-badge {
+      font-family: var(--mono);
+      font-size: 0.65rem;
+      letter-spacing: 0.15em;
+      padding: 3px 10px;
+      border-radius: 100px;
+      border: 1px solid var(--border);
+      color: var(--muted);
+      cursor: pointer;
+      transition: border-color 0.2s, color 0.2s;
+      background: transparent;
+    }
+    .graph-badge:hover { border-color: var(--accent); color: var(--accent); }
+    .graph-badge.active { border-color: var(--accent); color: var(--accent); background: rgba(0,212,255,0.08); }
+    #graphCanvas {
+      width: 100%;
+      height: 220px;
+      display: block;
+      border-radius: 6px;
+      background: #070a0e;
+      border: 1px solid var(--border);
+    }
+    .graph-meta {
+      display: flex;
+      justify-content: space-between;
+      margin-top: 8px;
+      font-family: var(--mono);
+      font-size: 0.65rem;
+      color: var(--muted);
+    }
+    #graphCurrentVal {
+      font-family: var(--mono);
+      font-size: 0.72rem;
+      color: var(--accent);
+    }
+
   </style>
 </head>
 <body>
@@ -446,6 +526,7 @@
     </div>
 
     <button id="runBtn">▶ Run</button>
+    <button id="calibrateBtn" disabled>⊙ Calibrate</button>
 
     <div id="waitingBar">
       <div class="spinner"></div>
@@ -528,6 +609,25 @@
     </div>
   </div>
 
+ <!-- ── Live Pressure Graph ── -->
+  <div class="card full">
+    <div class="graph-header">
+      <div class="card-label" style="margin-bottom:0;">// Live Pressure Graph</div>
+      <div class="graph-controls">
+        <span id="graphCurrentVal">— PSI</span>
+        <button class="graph-badge active" id="btnWindow30">30s</button>
+        <button class="graph-badge" id="btnWindow60">60s</button>
+        <button class="graph-badge" id="btnWindowAll">All</button>
+        <button class="graph-badge" id="btnClearGraph">✕ Clear</button>
+      </div>
+    </div>
+    <canvas id="graphCanvas"></canvas>
+    <div class="graph-meta">
+      <span id="graphTimeRange">Time (s)</span>
+      <span id="graphPointCount">0 points</span>
+    </div>
+  </div>
+
 </main>
 
 <script>
@@ -545,6 +645,7 @@
   const applicationTimeSlider= document.getElementById('applicationTimeSlider');
   const applicationTimeDisplay= document.getElementById('applicationTimeDisplay');
   const runBtn         = document.getElementById('runBtn');
+  const calibrateBtn         = document.getElementById('calibrateBtn');
   const waitingBar     = document.getElementById('waitingBar');
   const terminal       = document.getElementById('terminal');
   const statusPill     = document.getElementById('statusPill');
@@ -571,6 +672,8 @@
 
   function setApplicationTime(val) {
     const w = Math.max(0, Math.min(MAX_APPLICATIONTIME, parseFloat(val) || 0));
+    //console.log(MAX_APPLICATIONTIME);
+    //console.log(val);
     applicationTimeInput.value  = w;
     applicationTimeSlider.value = w;
     applicationTimeDisplay.textContent = w.toFixed(1);
@@ -635,12 +738,14 @@
     logBody.prepend(tr); // newest first
   }
 
-  // ── Serial status ──
+  // ── Serial status, different behavior online vs offline──
+  
   socket.on('serial_status', ({ connected, message }) => {
     statusPill.className = 'status-pill ' + (connected ? 'online' : 'offline');
     statusText.textContent = connected ? 'UART Online' : 'UART Offline';
     termLog(message, connected ? 'info' : 'err');
     runBtn.disabled = !connected;
+    calibrateBtn.disabled = !connected;
   });
 
   // ── STM32 response ──
@@ -654,7 +759,7 @@
   });
 
   // ── Waiting state ──
-  let lastSent = { name: '', pressure: '' };
+  let lastSent = { name: '', pressure: '', applicationTime: '' };
 
   function setWaiting(active) {
     isWaiting = active;
@@ -691,13 +796,16 @@
     lastSent = { name, pressure: pressure.toFixed(2), applicationTime: applicationTime.toFixed(2) };
 	  termLog(`→ Sending: NAME:${name} | PRESSURE:${pressure.toFixed(2)} PSI | APPLICATIONTIME:${applicationTime.toFixed(2)} seconds`, 'send');
     setWaiting(true);
-
+    calibrateBtn.disabled = false;
+    calibrateBtn.classList.add('ready');
     try {
+	    <!-- This is the fetch call which builds the POST body -->
       const res  = await fetch('/api/run', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name, pressure }),
+        body: JSON.stringify({ name, pressure, applicationTime }),
       });
+	    console.log("test");
       const json = await res.json();
       if (!res.ok) {
         termLog(`Error: ${json.error}`, 'err');
@@ -712,10 +820,245 @@
     }
   });
 
+
+  // ── Calibration button ──
+calibrateBtn.addEventListener('click', () => {
+  if (calibrateBtn.disabled) return;
+
+  termLog('⊙ Calibrating — place object on sensor now…', 'wait');
+
+  fetch('/api/calibrate', { method: 'POST' })
+    .then(res => res.json())
+    .then(json => {
+      if (json.error) {
+        termLog(`Calibration error: ${json.error}`, 'err');
+      } else {
+        termLog(`Calibration command sent at ${new Date(json.timestamp).toLocaleTimeString()}`, 'info');
+      }
+    })
+    .catch(err => termLog(`Calibration request failed: ${err.message}`, 'err'));
+});
+
   // ── Init ──
   setPressure(0);
   setApplicationTime(0)
   termLog('Interface ready. Awaiting UART connection…', 'info');
+
+  // ── Live Pressure Graph ──
+  const canvas      = document.getElementById('graphCanvas');
+  const ctx         = canvas.getContext('2d');
+  const btnW30      = document.getElementById('btnWindow30');
+  const btnW60      = document.getElementById('btnWindow60');
+  const btnWAll     = document.getElementById('btnWindowAll');
+  const btnClear    = document.getElementById('btnClearGraph');
+  const graphCurVal = document.getElementById('graphCurrentVal');
+  const graphRange  = document.getElementById('graphTimeRange');
+  const graphCount  = document.getElementById('graphPointCount');
+
+  // Data store: array of { t: seconds_since_first_point, psi: number }
+  let graphData     = [];
+  let graphStart    = null;   // epoch ms of first point in current session
+  let windowSec     = 30;     // how many seconds to show (null = all)
+
+  // DPI-aware resize
+  function resizeCanvas() {
+    const rect = canvas.getBoundingClientRect();
+    const dpr  = window.devicePixelRatio || 1;
+    canvas.width  = rect.width  * dpr;
+    canvas.height = rect.height * dpr;
+    ctx.scale(dpr, dpr);
+    drawGraph();
+  }
+  window.addEventListener('resize', resizeCanvas);
+
+  // Window toggle buttons
+  function setWindow(sec, activeBtn) {
+    windowSec = sec;
+    [btnW30, btnW60, btnWAll].forEach(b => b.classList.remove('active'));
+    activeBtn.classList.add('active');
+    drawGraph();
+  }
+  btnW30.addEventListener('click', () => setWindow(30,  btnW30));
+  btnW60.addEventListener('click', () => setWindow(60,  btnW60));
+  btnWAll.addEventListener('click',() => setWindow(null, btnWAll));
+
+  btnClear.addEventListener('click', () => {
+    graphData  = [];
+    graphStart = null;
+    graphCurVal.textContent = '— PSI';
+    graphCount.textContent  = '0 points';
+    graphRange.textContent  = 'Time (s)';
+    drawGraph();
+  });
+
+  // Receive live readings from server
+  socket.on('pressure_reading', ({ timestamp, pressure }) => {
+    const epochMs = new Date(timestamp).getTime();
+    if (graphStart === null) graphStart = epochMs;
+    const t = (epochMs - graphStart) / 1000;
+    graphData.push({ t, psi: pressure });
+
+    graphCurVal.textContent = `${pressure.toFixed(2)} PSI`;
+    graphCount.textContent  = `${graphData.length} point${graphData.length !== 1 ? 's' : ''}`;
+    drawGraph();
+  });
+
+  function drawGraph() {
+    const W = canvas.getBoundingClientRect().width;
+    const H = canvas.getBoundingClientRect().height;
+    ctx.clearRect(0, 0, W, H);
+
+    // Background already set via CSS; draw grid lines
+    const PAD = { top: 14, right: 16, bottom: 36, left: 52 };
+    const plotW = W - PAD.left - PAD.right;
+    const plotH = H - PAD.top  - PAD.bottom;
+
+    // Determine visible data slice
+    let visible = graphData;
+    let tMin = 0, tMax = 30;
+
+    if (graphData.length > 0) {
+      const lastT = graphData[graphData.length - 1].t;
+      if (windowSec !== null) {
+        tMin = Math.max(0, lastT - windowSec);
+        tMax = tMin + windowSec;
+        visible = graphData.filter(d => d.t >= tMin);
+      } else {
+        tMin = 0;
+        tMax = Math.max(lastT, 1);
+        visible = graphData;
+      }
+      graphRange.textContent = `${tMin.toFixed(0)}s – ${tMax.toFixed(0)}s`;
+    }
+
+    const psiValues = visible.map(d => d.psi);
+    const rawMax    = psiValues.length ? Math.max(...psiValues) : 100;
+    const rawMin    = psiValues.length ? Math.min(...psiValues) : 0;
+    const psiPad    = Math.max((rawMax - rawMin) * 0.15, rawMax * 0.1, 5);
+    const psiMin    = Math.max(0, rawMin - psiPad);
+    const psiMax    = rawMax + psiPad;
+
+    // Helpers: data coords → canvas px
+    const xOf = t   => PAD.left + ((t - tMin) / (tMax - tMin)) * plotW;
+    const yOf = psi => PAD.top  + (1 - (psi - psiMin) / (psiMax - psiMin)) * plotH;
+
+    // ── Grid ──
+    ctx.strokeStyle = 'rgba(30,42,58,0.8)';
+    ctx.lineWidth   = 1;
+    const ySteps = 5;
+    for (let i = 0; i <= ySteps; i++) {
+      const psi = psiMin + (psiMax - psiMin) * (i / ySteps);
+      const y   = yOf(psi);
+      ctx.beginPath();
+      ctx.moveTo(PAD.left, y);
+      ctx.lineTo(PAD.left + plotW, y);
+      ctx.stroke();
+
+      // Y axis labels
+      ctx.fillStyle = '#4a6175';
+      ctx.font      = `10px 'Share Tech Mono', monospace`;
+      ctx.textAlign = 'right';
+      ctx.fillText(psi.toFixed(0), PAD.left - 6, y + 3.5);
+    }
+
+    // X axis time labels
+    const xSteps = 6;
+    for (let i = 0; i <= xSteps; i++) {
+      const t = tMin + (tMax - tMin) * (i / xSteps);
+      const x = xOf(t);
+      ctx.strokeStyle = 'rgba(30,42,58,0.8)';
+      ctx.lineWidth   = 1;
+      ctx.beginPath();
+      ctx.moveTo(x, PAD.top);
+      ctx.lineTo(x, PAD.top + plotH);
+      ctx.stroke();
+
+      ctx.fillStyle = '#4a6175';
+      ctx.font      = `10px 'Share Tech Mono', monospace`;
+      ctx.textAlign = 'center';
+      ctx.fillText(`${t.toFixed(0)}s`, x, PAD.top + plotH + 18);
+    }
+
+    // Axes
+    ctx.strokeStyle = '#1e2a3a';
+    ctx.lineWidth   = 1.5;
+    ctx.beginPath();
+    ctx.moveTo(PAD.left, PAD.top);
+    ctx.lineTo(PAD.left, PAD.top + plotH);
+    ctx.lineTo(PAD.left + plotW, PAD.top + plotH);
+    ctx.stroke();
+
+    // Y axis unit label
+    ctx.save();
+    ctx.translate(13, PAD.top + plotH / 2);
+    ctx.rotate(-Math.PI / 2);
+    ctx.fillStyle = '#4a6175';
+    ctx.font      = `9px 'Share Tech Mono', monospace`;
+    ctx.textAlign = 'center';
+    ctx.fillText('PSI', 0, 0);
+    ctx.restore();
+
+    if (visible.length < 2) {
+      // No data message
+      ctx.fillStyle = '#4a6175';
+      ctx.font      = `12px 'Share Tech Mono', monospace`;
+      ctx.textAlign = 'center';
+      ctx.fillText('Awaiting pressure readings from STM32…', PAD.left + plotW / 2, PAD.top + plotH / 2);
+      return;
+    }
+
+    // ── Gradient fill under curve ──
+    const grad = ctx.createLinearGradient(0, PAD.top, 0, PAD.top + plotH);
+    grad.addColorStop(0,   'rgba(0,212,255,0.22)');
+    grad.addColorStop(1,   'rgba(0,212,255,0)');
+
+    ctx.beginPath();
+    ctx.moveTo(xOf(visible[0].t), yOf(visible[0].psi));
+    for (let i = 1; i < visible.length; i++) {
+      const px = xOf(visible[i].t);
+      const py = yOf(visible[i].psi);
+      // Smooth curve with bezier
+      const prevX = xOf(visible[i - 1].t);
+      const prevY = yOf(visible[i - 1].psi);
+      const cpX   = (prevX + px) / 2;
+      ctx.bezierCurveTo(cpX, prevY, cpX, py, px, py);
+    }
+    ctx.lineTo(xOf(visible[visible.length - 1].t), PAD.top + plotH);
+    ctx.lineTo(xOf(visible[0].t), PAD.top + plotH);
+    ctx.closePath();
+    ctx.fillStyle = grad;
+    ctx.fill();
+
+    // ── Main line ──
+    ctx.beginPath();
+    ctx.moveTo(xOf(visible[0].t), yOf(visible[0].psi));
+    for (let i = 1; i < visible.length; i++) {
+      const px   = xOf(visible[i].t);
+      const py   = yOf(visible[i].psi);
+      const prevX = xOf(visible[i - 1].t);
+      const prevY = yOf(visible[i - 1].psi);
+      const cpX   = (prevX + px) / 2;
+      ctx.bezierCurveTo(cpX, prevY, cpX, py, px, py);
+    }
+    ctx.strokeStyle = '#00d4ff';
+    ctx.lineWidth   = 2;
+    ctx.lineJoin    = 'round';
+    ctx.stroke();
+
+    // ── Latest point dot ──
+    const last = visible[visible.length - 1];
+    ctx.beginPath();
+    ctx.arc(xOf(last.t), yOf(last.psi), 4, 0, Math.PI * 2);
+    ctx.fillStyle   = '#00d4ff';
+    ctx.shadowColor = '#00d4ff';
+    ctx.shadowBlur  = 8;
+    ctx.fill();
+    ctx.shadowBlur  = 0;
+  }
+
+  // Init canvas size
+  resizeCanvas();
+
 </script>
 </body>
 </html>
