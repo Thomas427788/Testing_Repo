@@ -1,3 +1,8 @@
+// All of these are Node.js libraries. This is 
+// basically describing that Node.js is loading
+// in these optional libraries, and we are 
+// naming them all constant values with which
+// we call in their modules, ie express.bleh
 const express = require('express');
 const http = require('http');
 const { SerialPort } = require('serialport');
@@ -6,6 +11,9 @@ const { Server } = require('socket.io');
 const fs = require('fs');
 const path = require('path');
 
+// express() is a javascript library used for web making
+// we are going to rename it 'app' to call it faster
+// and make it more readable
 const app = express();
 const server = http.createServer(app);
 const io = new Server(server);
@@ -17,7 +25,7 @@ const LOG_FILE = path.join(__dirname, 'session_log.csv');
 
 // --- Ensure log file has a header ---
 if (!fs.existsSync(LOG_FILE)) {
-  fs.writeFileSync(LOG_FILE, 'timestamp,name,pressure_psi,stm32_response\n');
+  fs.writeFileSync(LOG_FILE, 'timestamp,name,pressure_psi,application_time,stm32_response\n');
 }
 
 // --- Serial Port Setup ---
@@ -63,7 +71,27 @@ function initSerial() {
       const timestamp = new Date().toISOString();
       io.emit('stm32_response', { timestamp, data: trimmed });
 
-      // Append to log (STM32 response column only — name/pressure logged at send time)
+      // Append to log (STM32 response column only — name/pressure/application_time logged at send time)
+
+	const pressureMatch = trimmed.match(/PRESSURE:([\d.]+)/i);
+	if (pressureMatch) {
+	  const pressure = parseFloat(pressureMatch[1]);
+	  if (!isNaN(pressure)) {
+	    io.emit('pressure_reading', { timestamp, pressure });
+	    console.log(`[PI] Pressure reading: ${pressure} PSI`);
+	  }
+	}
+
+
+	//const timeMatch = trimmed.match(/DURATION:([\d.]+)/i);
+	//if (timeMatch) {
+	//  const applicationTime = parseFloat(applicationTimeMatch[1]);
+	//  if (!isNaN(applicationTime)) {
+	//    io.emit('applicationTime_reading', { applicationTimestamp, pressure });
+	//    console.log(`[PI] Time reading: ${applicationTime} seconds`);
+	//  }
+	//}
+
       fs.appendFileSync(LOG_FILE, `${timestamp},,,${trimmed}\n`);
     });
 
@@ -80,7 +108,23 @@ app.use(express.json());
 
 // --- REST: Send command to STM32 ---
 app.post('/api/run', (req, res) => {
-  const { name, pressure } = req.body;
+	// This is the request body that is being created
+  const { name, pressure, applicationTime } = req.body; // { wow, 5.0 } time is not working
+  //console.log("This is the request body from the HTML page");
+  //console.log(req.body);
+
+  //console.log("RT thing")
+  //console.log(req.body["applicationTime"]);
+
+  //console.log("define 'time' as req.body'applicationTime'")
+  const time = req.body["applicationTime"];
+
+
+  //console.log("This is the 'pressure' variable");
+  //console.log(pressure);
+
+  //console.log("This is the 'time' variable");
+  //console.log(applicationTime);
 
   if (!name || pressure === undefined) {
     return res.status(400).json({ error: 'Missing name or pressure' });
@@ -91,8 +135,14 @@ app.post('/api/run', (req, res) => {
     return res.status(400).json({ error: 'Pressure must be a non-negative number' });
   }
 
-  // Format: NAME:John;PRESSURE:45.5\n
-  const payload = `NAME:${name.trim()};PRESSURE:${pressureNum.toFixed(2)}\n`;
+  const timeNum = parseFloat(applicationTime);
+  //console.log("This is the 'timeNum' variable that comes from parseFloat(time)");
+  //console.log(timeNum);
+  if ( isNaN(timeNum) ) {
+    return res.status(400).json({ error: 'Time is NaN' });
+  }
+  // Format: NAME:John;PRESSURE:45.5;TIME:10\n
+  const payload = `NAME:${name.trim()};PRESSURE:${pressureNum.toFixed(2)};TIME:${timeNum.toFixed(2)}\n`;
 
   if (!serialPort || !serialPort.isOpen) {
     return res.status(503).json({ error: 'Serial port is not open' });
@@ -105,11 +155,30 @@ app.post('/api/run', (req, res) => {
     }
 
     const timestamp = new Date().toISOString();
-    console.log(`[→ STM32] ${payload.trim()}`);
+    console.log(`${payload.trim()}`);
 
-    // Log the outgoing command
-    fs.appendFileSync(LOG_FILE, `${timestamp},${name.trim()},${pressureNum.toFixed(2)},\n`);
+    // Log the outgoing command to the csv file in the home directory
+    fs.appendFileSync(LOG_FILE, `${timestamp},${name.trim()},${pressureNum.toFixed(2)},${timeNum.toFixed(2)}\n`);
+    res.json({ success: true, sent: payload.trim(), timestamp });
+  });
+});
 
+// --- REST: Send calibrate command to STM32 ---
+app.post('/api/calibrate', (req, res) => {
+  if (!serialPort || !serialPort.isOpen) {
+    return res.status(503).json({ error: 'Serial port is not open' });
+  }
+
+  const payload = `CMD:CALIBRATE\n`;
+
+  serialPort.write(payload, (err) => {
+    if (err) {
+      console.error('[TX] Calibrate write error:', err.message);
+      return res.status(500).json({ error: err.message });
+    }
+    const timestamp = new Date().toISOString();
+    console.log(`[CALIBRATE] Command sent`);
+    fs.appendFileSync(LOG_FILE, `${timestamp},CALIBRATE,,,\n`);
     res.json({ success: true, sent: payload.trim(), timestamp });
   });
 });
